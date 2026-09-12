@@ -1,333 +1,217 @@
-"""
-Module: app.py
-Application: VERDANT - Autonomous Engineering Co-Pilot for Sustainable DFM
-Purpose:
-    Serves the primary Streamlit user interface for VERDANT.
-    Handles user interaction workflows including:
-    - Ingesting parametric STEP and triangulated mesh CAD models
-    - Displaying 1:1 true-scale 3D WebGL visualizations and Ashby trade-off plots
-    - Presenting deterministic structural and thermal metric calculations
-    - Invoking the Gemini 3.5 Flash reasoning engine for autonomous diagnosis
-    - Facilitating interactive design review dialogues and exporting formal ECP reports
-"""
+"""VERDANT — a guided workspace for lower-impact component design."""
+import hashlib
+import html
+import json
+from pathlib import Path
 
-import os
-import streamlit as st
-import numpy as np
 import plotly.graph_objects as go
-
-from materialDatabase import materialDatabase
+import streamlit as st
 from cadParser import parseCadFile
 from physicsEngine import computePhysicalInvariants
+from materialDatabase import materialDatabase
 from geminiAdvisor import queryGeminiEngineer, chatWithEngineer, generateFormalEcpReport, geminiApiKey
 
-# Page Setup and Session State Initialization
-# Session state preserves user chat history and generated
-# ECP markdown between Streamlit UI reruns.
+st.set_page_config(page_title="Verdant · Design with less", page_icon="🌿", layout="wide")
+st.markdown('''<style>
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap');
+:root {color-scheme:light;}
+.stApp {background:#f5f7f3;color:#213c32;font-family:'DM Sans',sans-serif;}
+h1,h2,h3 {font-family:'Manrope',sans-serif!important;letter-spacing:-.045em!important;color:#173c2c!important;}
+h1 {font-size:2.8rem!important;font-weight:800!important;} h2 {font-size:1.55rem!important;} h3 {font-size:1.15rem!important;}
+[data-testid="stHeader"] {background:#f5f7f3e8;} .block-container {max-width:1440px;padding-top:4rem;padding-bottom:4rem;}
+[data-testid="stSidebar"] {background:#ebf0e8;border-right:1px solid #dbe3d7;} [data-testid="stSidebar"] .block-container {padding-top:2rem;}
+[data-testid="stVerticalBlockBorderWrapper"] {border-radius:16px!important;}
+[data-testid="stMetric"] {background:white;padding:20px;border:1px solid #e1e7dd;border-radius:14px;}
+[data-testid="stMetricValue"] {font-family:'Manrope',sans-serif;font-size:1.8rem;color:#193e2b;}
+[data-testid="stMetricLabel"] {color:#69796b;font-size:.8rem;}
+.stButton button,.stDownloadButton button {border-radius:9px;min-height:42px;font-weight:600;}
+.stButton button[kind="primary"] {background:#244e39;border:1px solid #244e39;color:white;}
+.stButton button[kind="primary"]:hover {background:#366c4e;border-color:#366c4e;}
+[data-baseweb="tab-list"] {gap:24px;border-bottom:1px solid #dbe3d7;margin-bottom:22px;} [data-baseweb="tab"] {color:#566b5e;padding:12px 2px;}
+[data-testid="stFileUploader"] {background:#fff;border-radius:12px;}
+.brand {font-family:Manrope,sans-serif;font-weight:800;font-size:26px;letter-spacing:-1px;margin-bottom:3px;}
+.brand span {color:#7d9c55;} .eyebrow {color:#6a805f;font-size:11px;font-weight:700;letter-spacing:2px;text-transform:uppercase;}
+.subtle {color:#778674;font-size:13px;line-height:1.7;} .hero {border-radius:20px;padding:32px;background:#e4eddf;margin:6px 0 24px;position:relative;overflow:hidden;}
+.hero h1 {margin:8px 0 12px;max-width:700px;} .hero p {color:#56704e;max-width:640px;font-size:16px;line-height:1.7;margin:0;}
+.pill {display:inline-block;border:1px solid #c8d8bf;border-radius:30px;padding:5px 12px;font-size:11px;color:#4d6845;letter-spacing:.5px;}
+.step {font-size:12px;color:#6e8065;padding:0 0 20px;letter-spacing:.3px;} .step b {color:#244e39;} .step span {margin:0 18px;color:#a3b09b;}
+.file-name {font-family:Manrope,sans-serif;font-size:22px;font-weight:700;color:#244e39;overflow-wrap:anywhere;}
+[data-testid="stCaptionContainer"] {color:#657660;}
+@media(max-width:700px){h1{font-size:2rem!important}.hero{padding:22px}.step span{margin:0 6px}.block-container{padding-left:1rem;padding-right:1rem}}
+</style>''', unsafe_allow_html=True)
 
-st.set_page_config(
-    page_title="VERDANT | Sustainable DFM and CAD Co-Pilot",
-    layout="wide"
-)
-
-if "chatMessages" not in st.session_state:
-    st.session_state.chatMessages = []
-
-if "ecpReportContent" not in st.session_state:
-    st.session_state.ecpReportContent = None
-
-st.title("VERDANT: Autonomous Engineering Co-Pilot")
-st.caption("Physics-Grounded DFM Optimization, Parametric B-Rep Analysis, and Multi-Objective Eco-Design")
-
-
-# Sidebar User Inputs for Operational Boundary Conditions
-# Configures material parameters, environment, mechanical
-# loads, and thermal boundaries.
-
-st.sidebar.header("Material and Environment")
-
-materialOptions = {key: data["displayName"] for key, data in materialDatabase.items()}
-selectedMaterialKey = st.sidebar.selectbox(
-    "Baseline Material",
-    options=list(materialOptions.keys()),
-    format_func=lambda materialKey: materialOptions[materialKey],
-    index=0
-)
-
-environmentType = st.sidebar.selectbox(
-    "Operating Environment",
-    options=["indoor", "outdoorUv", "marineCorrosive", "chemicalContact"],
-    format_func=lambda envKey: {
-        "indoor": "Indoor / Controlled",
-        "outdoorUv": "Outdoor (UV Exposure and Weather)",
-        "marineCorrosive": "Marine / Saline Corrosive",
-        "chemicalContact": "Industrial Solvent / Chemical"
-    }[envKey]
-)
-
-st.sidebar.header("Mechanical Loading")
-loadType = st.sidebar.selectbox("Primary Load Direction", options=["compressive", "tensile", "bending"])
-appliedForceN = st.sidebar.number_input("Applied Force (N)", min_value=10.0, max_value=1000000.0, value=8000.0, step=500.0)
-
-st.sidebar.header("Thermal Environment")
-tempCol1, tempCol2 = st.sidebar.columns(2)
-with tempCol1:
-    tempMinC = st.number_input("Min Temp (C)", value=-10.0, step=5.0)
-with tempCol2:
-    tempMaxC = st.number_input("Max Temp (C)", value=65.0, step=5.0)
-
-isConstrainedThermal = st.sidebar.checkbox(
-    "Rigidly Constrained Assembly?",
-    value=False,
-    help="Enable if thermal expansion is constrained by adjacent rigid mounting interfaces."
-)
+for key, default in dict(chatMessages=[], ecpReportContent=None, aiReport=None, contextKey=None, sample=None).items():
+    if key not in st.session_state:
+        st.session_state[key] = default
 
 
-def render3dMesh(vertices, faces):
-    """
-    Renders 3D geometry using Plotly Mesh3d.
-    Enforces aspectmode='data' to preserve exact physical aspect ratios (1:1 scale)
-    and prevent thin parts from distorting into cubes.
-    """
-    fig = go.Figure(
-        data=[
-            go.Mesh3d(
-                x=vertices[:, 0],
-                y=vertices[:, 1],
-                z=vertices[:, 2],
-                i=faces[:, 0],
-                j=faces[:, 1],
-                k=faces[:, 2],
-                color="#00ADB5",
-                opacity=0.85,
-                flatshading=True,
-            )
-        ]
-    )
-    fig.update_layout(
-        scene=dict(
-            aspectmode="data",
-            xaxis=dict(showbackground=False, title="X (mm)"),
-            yaxis=dict(showbackground=False, title="Y (mm)"),
-            zaxis=dict(showbackground=False, title="Z (mm)"),
-            camera=dict(eye=dict(x=1.5, y=1.5, z=1.2)),
-        ),
-        margin=dict(l=0, r=0, b=0, t=0),
-        height=340,
-    )
+def error_message(exc):
+    return str(exc).replace(geminiApiKey, "[hidden]") if geminiApiKey else str(exc)
+
+
+@st.cache_data(show_spinner=False, max_entries=8)
+def geometry(data, name):
+    return parseCadFile(data, name)
+
+
+def mesh_plot(cad):
+    v, f = cad['vertices'], cad['faces']
+    fig = go.Figure(go.Mesh3d(x=v[:, 0], y=v[:, 1], z=v[:, 2], i=f[:, 0], j=f[:, 1], k=f[:, 2],
+        color='#709965', flatshading=True, lighting=dict(ambient=.55, diffuse=.8, roughness=.5), hoverinfo='skip'))
+    fig.update_layout(height=370, paper_bgcolor='#ffffff', margin=dict(l=0,r=0,t=0,b=0),
+        scene=dict(bgcolor='#ffffff', aspectmode='data', camera=dict(eye=dict(x=1.6,y=1.6,z=1.1)),
+        xaxis=dict(title='X · mm',showbackground=False,gridcolor='#edf0e9'),
+        yaxis=dict(title='Y · mm',showbackground=False,gridcolor='#edf0e9'),
+        zaxis=dict(title='Z · mm',showbackground=False,gridcolor='#edf0e9')))
     return fig
 
 
-def renderAshbyPlot(activeBaselineKey):
-    """
-    Generates a 2D Ashby scatter plot comparing material yield strength
-    against embodied carbon footprint to visualize Pareto trade-offs.
-    """
-    materialNames = [data["displayName"] for data in materialDatabase.values()]
-    yieldStrengths = [data["yieldStrengthMpa"] for data in materialDatabase.values()]
-    carbonFactors = [data["carbonFactorKgCo2ePerKg"] for data in materialDatabase.values()]
-    allKeys = list(materialDatabase.keys())
-
-    markerColors = ["#FF5722" if key == activeBaselineKey else "#3F51B5" for key in allKeys]
-
-    fig = go.Figure()
-    fig.add_trace(
-        go.Scatter(
-            x=carbonFactors,
-            y=yieldStrengths,
-            mode="markers+text",
-            text=materialNames,
-            textposition="top right",
-            marker=dict(size=12, color=markerColors, line=dict(width=1, color="DarkSlateGrey")),
-            hoverinfo="text",
-        )
-    )
-    fig.update_layout(
-        title="Ashby Trade-Off: Strength vs. Embodied Carbon",
-        xaxis_title="Embodied Carbon (kg CO2e / kg)",
-        yaxis_title="Yield Strength (MPa)",
-        margin=dict(l=40, r=40, b=40, t=40),
-        height=340,
-    )
+def materials_plot(active):
+    rows=list(materialDatabase.items())
+    fig=go.Figure(go.Scatter(x=[v['carbonFactorKgCo2ePerKg'] for _,v in rows],
+        y=[v['yieldStrengthMpa'] for _,v in rows],mode='markers',
+        text=[v['displayName'] for _,v in rows],
+        marker=dict(size=[18 if k==active else 11 for k,_ in rows],color=['#244e39' if k==active else '#b6caa3' for k,_ in rows],line=dict(color='white',width=2)),
+        hovertemplate='%{text}<br>%{x} kg CO₂e/kg<br>%{y} MPa<extra></extra>'))
+    fig.update_layout(height=370,paper_bgcolor='white',plot_bgcolor='white',font=dict(color='#657660'),
+        margin=dict(l=20,r=20,t=20,b=20),xaxis=dict(title='Embodied carbon · kg CO₂e/kg',gridcolor='#edf0e9'),
+        yaxis=dict(title='Yield strength · MPa',gridcolor='#edf0e9'))
     return fig
 
-# Main Workspace Routing
-# Views:
-# 1. Design Workspace and Co-Pilot: Active geometry analysis,
-#    Ashby charts, AI deck, and live chat.
-# 2. Formal ECP Audit Report: Exportable document view for
-#    finalized engineering proposals.
 
-tabWorkspace, tabReport = st.tabs(["Design Workspace and Co-Pilot", "Formal ECP Audit Report"])
+with st.sidebar:
+    st.markdown('<div class="brand">◈ verdant<span>.</span></div><div class="subtle">Less impact. Better design.</div>',unsafe_allow_html=True)
+    st.divider()
+    st.markdown('### Design conditions')
+    st.caption('Set the baseline for your component.')
+    selected=st.selectbox('Baseline material',list(materialDatabase),format_func=lambda k:materialDatabase[k]['displayName'])
+    environments={'indoor':'Indoor / controlled','outdoorUv':'Outdoor / UV exposure','marineCorrosive':'Marine / saline','chemicalContact':'Industrial / chemicals'}
+    environment=st.selectbox('Operating environment',list(environments),format_func=environments.get)
+    st.divider()
+    load=st.selectbox('Load type',['compressive','tensile','bending'],format_func=str.capitalize)
+    force=st.number_input('Applied force · N',min_value=10.0,max_value=1000000.0,value=8000.0,step=500.0)
+    with st.expander('Temperature & mounting',expanded=True):
+        a,b=st.columns(2)
+        low=a.number_input('Min · °C',value=-10.0,step=5.0)
+        high=b.number_input('Max · °C',value=65.0,step=5.0)
+        constrained=st.checkbox('Rigidly constrained',help='Mounting prevents free thermal expansion.')
+    st.divider()
+    st.caption('● Gemini key configured' if geminiApiKey else '○ Gemini key not configured')
+    st.caption('Local workspace · files stay on this computer. AI actions send component metrics and chat to Gemini.')
 
-with tabWorkspace:
-    uploadedFile = st.file_uploader(
-        "Upload 3D CAD Geometry (.step, .stp, .stl, .obj)",
-        type=["step", "stp", "stl", "obj"]
-    )
+st.markdown('<div class="eyebrow">COMPONENT DESIGN STUDIO / WORKSPACE</div>',unsafe_allow_html=True)
+st.markdown('''<div class="hero"><span class="pill">SUSTAINABILITY STARTS WITH DESIGN</span><h1>Better parts.<br>A lighter footprint.</h1><p>Explore your geometry, understand its material impact, and discover possibilities for a more efficient design.</p></div>''',unsafe_allow_html=True)
+st.markdown('<div class="step"><b>01 &nbsp; Add a component</b><span>→</span>02 &nbsp; Explore & analyze<span>→</span>03 &nbsp; Export your review</div>',unsafe_allow_html=True)
 
-    if uploadedFile is not None:
-        try:
-            fileBytes = uploadedFile.getvalue()
-            cadMetrics = parseCadFile(fileBytes, uploadedFile.name)
+with st.expander('Component library',expanded=True):
+    upload=st.file_uploader('Upload a component',type=['step','stp','stl','obj'],help='Mesh coordinates are interpreted as millimeters. STEP units are handled by the importer.')
+    st.caption('No file handy? Start with a sample. Uploaded files take priority.')
+    cols=st.columns(3)
+    for col,(label,name) in zip(cols,[('Try a block','sample_block.stl'),('Try a bracket','sample_bracket.stl'),('Try a cylinder','sample_cylinder.stl')]):
+        if col.button(label,width='stretch'):
+            st.session_state.sample=name
 
-            operationalParams = {
-                "baselineMaterialKey": selectedMaterialKey,
-                "loadType": loadType,
-                "appliedForceN": appliedForceN,
-                "tempMinC": tempMinC,
-                "tempMaxC": tempMaxC,
-                "tempDeltaC": abs(tempMaxC - tempMinC),
-                "environmentType": environmentType,
-                "isConstrainedThermal": isConstrainedThermal,
-            }
-
-            invariantsPayload = computePhysicalInvariants(cadMetrics, operationalParams)
-            baseline = invariantsPayload["baselineSummary"]
-
-            # Display deterministic structural and geometric invariants
-            col1, col2, col3, col4, col5 = st.columns(5)
-            col1.metric("CAD Solid", f"{'B-Rep STEP' if cadMetrics['isBRep'] else 'Mesh STL'}")
-            col2.metric("Nominal Mass", f"{baseline['massKg']} kg")
-            col3.metric("Embodied CO2e", f"{baseline['embodiedCo2eKg']} kg")
-            col4.metric(
-                "Stress and SF",
-                f"{baseline['appliedStressMpa']} MPa",
-                f"{baseline['safetyFactor']}x SF",
-                delta_color="normal" if baseline["safetyFactor"] >= 1.5 else "inverse"
-            )
-            col5.metric(
-                "Buckling Risk",
-                "High Risk" if baseline["isBucklingRisk"] else "Low Risk",
-                delta_color="inverse" if baseline["isBucklingRisk"] else "normal"
-            )
-
-            st.markdown("---")
-
-            # Render 3D CAD view and 2D Ashby material selection space
-            viewCol, ashbyCol = st.columns([1, 1])
-            with viewCol:
-                st.subheader("3D CAD Geometry")
-                st.plotly_chart(render3dMesh(cadMetrics["vertices"], cadMetrics["faces"]), use_container_width=True)
-                st.caption(f"Bounding Box: {baseline['extentsMm'][0]} x {baseline['extentsMm'][1]} x {baseline['extentsMm'][2]} mm | True Ixx: {baseline['momentOfInertiaMm4']} mm4")
-
-            with ashbyCol:
-                st.subheader("Material Selection Space")
-                st.plotly_chart(renderAshbyPlot(selectedMaterialKey), use_container_width=True)
-
-            st.markdown("---")
-
-            # Execute Gemini 3.5 Flash autonomous reasoning pipeline
-            hasValidApiKey = geminiApiKey and geminiApiKey != "YOUR_GEMINI_API_KEY_HERE"
-
-            if hasValidApiKey:
-                with st.spinner("Analyzing boundary invariants and generating Pareto trade-off proposals..."):
-                    try:
-                        aiReport = queryGeminiEngineer(invariantsPayload)
-
-                        # Render discovered bottlenecks
-                        st.subheader("Identified Engineering Bottlenecks and Inefficiencies")
-                        bottleneckColumns = st.columns(len(aiReport.identifiedBottlenecks))
-                        for index, bottleneck in enumerate(aiReport.identifiedBottlenecks):
-                            with bottleneckColumns[index]:
-                                st.markdown(f"#### [{bottleneck.severity.upper()}] {bottleneck.phenomenon}")
-                                st.markdown(f"**Zone:** `{bottleneck.affectedRegion}`")
-                                st.write(bottleneck.rootCause)
-
-                        st.markdown("---")
-
-                        # Render multi-strategy Pareto trade-off deck
-                        st.subheader("Engineering Strategy Deck (Pareto Exploration)")
-                        tabTitles = [f"{proposal.badge} - {proposal.strategyName}" for proposal in aiReport.engineeringProposals]
-                        strategyTabs = st.tabs(tabTitles)
-
-                        for index, strategyTab in enumerate(strategyTabs):
-                            proposal = aiReport.engineeringProposals[index]
-                            with strategyTab:
-                                st.markdown(f"### {proposal.strategyName}")
-
-                                metricCol1, metricCol2, metricCol3, metricCol4 = st.columns(4)
-                                metricCol1.metric("Selected Material", proposal.recommendedMaterial)
-                                metricCol2.metric("CO2e Reduction", f"-{proposal.carbonReductionPct}%")
-                                metricCol3.metric("Cost Impact", f"{'+' if proposal.costDeltaPct > 0 else ''}{proposal.costDeltaPct}%")
-                                metricCol4.metric("Optimized Mass", f"{proposal.estimatedNewMassKg} kg")
-
-                                st.markdown("#### Structural and Thermal Justification")
-                                st.markdown(f"**Structural Mechanics:** {proposal.structuralFeasibility}")
-                                st.markdown(f"**Thermal Expansion:** {proposal.thermalFeasibility}")
-
-                                st.markdown("#### Actionable CAD and DFM Redesign Checklist")
-                                for modificationStep in proposal.cadModifications:
-                                    st.markdown(f"- {modificationStep}")
-
-                    except Exception as aiError:
-                        st.error(f"Gemini Reasoning Engine Error: {str(aiError)}")
-            else:
-                st.warning("Configure a valid Gemini API key in geminiAdvisor.py to run the autonomous reasoning engine.")
-
-            st.markdown("---")
-
-            # Interactive design review and contextual engineering chat
-            st.subheader("Interactive Design Review and Context Chat")
-            st.caption("Provide operating context (fatigue limits, mounting constraints, vibration spectrums) to refine engineering reasoning.")
-
-            for message in st.session_state.chatMessages:
-                with st.chat_message(message["role"]):
-                    st.markdown(message["content"])
-
-            userQuery = st.chat_input("Specify load cases, fatigue requirements, or packaging constraints...")
-            if userQuery:
-                st.session_state.chatMessages.append({"role": "user", "content": userQuery})
-                with st.chat_message("user"):
-                    st.markdown(userQuery)
-
-                with st.chat_message("assistant"):
-                    if hasValidApiKey:
-                        with st.spinner("Evaluating operational context against CAD invariants..."):
-                            try:
-                                botReply = chatWithEngineer(invariantsPayload, st.session_state.chatMessages, userQuery)
-                            except Exception as chatError:
-                                botReply = f"Error generating reply: {str(chatError)}"
-                            st.markdown(botReply)
-                            st.session_state.chatMessages.append({"role": "assistant", "content": botReply})
-                    else:
-                        warningReply = "A valid Gemini API Key is required to engage in technical design review chat."
-                        st.markdown(warningReply)
-                        st.session_state.chatMessages.append({"role": "assistant", "content": warningReply})
-
-            # Compile ECP report action button
-            st.markdown("---")
-            buttonCol1, buttonCol2 = st.columns([2, 1])
-            with buttonCol1:
-                st.write("Ready to synthesize this session into a formal engineering audit?")
-            with buttonCol2:
-                if st.button("Compile Formal ECP Report", use_container_width=True):
-                    if hasValidApiKey:
-                        with st.spinner("Synthesizing CAD metrics, physics calculations, and chat dialogue into formal ECP document..."):
-                            try:
-                                reportMarkdown = generateFormalEcpReport(invariantsPayload, st.session_state.chatMessages)
-                                st.session_state.ecpReportContent = reportMarkdown
-                                st.success("Formal ECP Report generated. View and export in the 'Formal ECP Audit Report' tab.")
-                            except Exception as reportError:
-                                st.error(f"Error generating ECP report: {str(reportError)}")
-                    else:
-                        st.error("A valid Gemini API Key is required to compile the formal ECP report.")
-
-        except Exception as pipelineError:
-            st.error(f"Analysis Pipeline Error: {str(pipelineError)}")
+name=upload.name if upload else st.session_state.sample
+if not name:
+    a,b,c=st.columns(3)
+    for col,title,body in [(a,'01 / Understand','Inspect a true-proportion 3D view and baseline material impact.'),(b,'02 / Explore','Request design ideas and compare material trade-offs.'),(c,'03 / Document','Ask follow-up questions and export an engineering review draft.')]:
+        with col,st.container(border=True):
+            st.markdown('### '+title); st.write(body)
+    st.stop()
+if high<low:
+    st.error('Maximum temperature must be at least the minimum temperature. Adjust the sidebar to continue.'); st.stop()
+try:
+    data=upload.getvalue() if upload else (Path(__file__).parent/name).read_bytes()
+    cad=geometry(data,name)
+    if cad['volumeCm3']<=0:
+        st.error('This model has no positive solid volume. Check its face orientation and export a closed solid to continue.'); st.stop()
+    params=dict(baselineMaterialKey=selected,loadType=load,appliedForceN=force,tempMinC=low,tempMaxC=high,tempDeltaC=high-low,environmentType=environment,isConstrainedThermal=constrained)
+    payload=computePhysicalInvariants(cad,params)
+except Exception as exc:
+    st.error('We couldn’t read this component. Try exporting it as a closed STEP or STL solid.')
+    with st.expander('Error details'): st.code(error_message(exc))
+    st.stop()
+context=hashlib.sha256(data+json.dumps(params,sort_keys=True).encode()).hexdigest()
+if context!=st.session_state.contextKey:
+    st.session_state.update(contextKey=context,aiReport=None,chatMessages=[],ecpReportContent=None)
+baseline=payload['baselineSummary']
+st.markdown(f'<div class="file-name">{html.escape(name)}</div>',unsafe_allow_html=True)
+st.caption(('STEP solid' if cad['isBRep'] else 'Polygon mesh')+'  ·  '+ ' × '.join(f'{v:g}' for v in baseline['extentsMm'])+' mm  ·  Current baseline')
+metrics=st.columns(4)
+for col,label,value in zip(metrics,['Estimated mass','Embodied carbon','Material cost','Model volume'],[f"{baseline['massKg']:g} kg",f"{baseline['embodiedCo2eKg']:g} kg CO₂e",f"${baseline['materialCostUsd']:.2f}",f"{baseline['volumeCm3']:g} cm³"]): col.metric(label,value)
+st.write('')
+overview,ideas,review=st.tabs(['Overview','Design ideas','Review & export'])
+with overview:
+    a,b=st.columns([1.2,1])
+    with a,st.container(border=True):
+        st.markdown('### Your component'); st.caption('Drag to orbit · scroll to zoom · double-click to reset')
+        st.plotly_chart(mesh_plot(cad),width='stretch',config={'displaylogo':False})
+    with b,st.container(border=True):
+        st.markdown('### Material landscape'); st.caption('Your baseline is highlighted. Hover to compare materials.')
+        st.plotly_chart(materials_plot(selected),width='stretch',config={'displaylogo':False})
+    with st.expander('Calculation assumptions & limitations'):
+        st.write('These are screening estimates, not validated structural results. The current engine approximates the cross section from volume and bounding dimensions; its thickness and inertia estimates do not resolve local walls or complex sections. Bending and tension are not modeled separately. Mesh units are assumed to be millimeters, and open meshes use a convex-hull volume estimate.')
+        st.write('Use verified geometry, material data, load conditions, and an appropriate engineering analysis before making a design decision.')
+    st.info('Next: open Design ideas to request an AI review. Analysis runs only when you ask for it.')
+with ideas:
+    st.markdown('### Find your next design direction')
+    st.caption('Compare opportunities for material substitution, lightweighting, and lower cost. AI suggestions require engineering verification.')
+    if st.button('Refresh design ideas' if st.session_state.aiReport else 'Generate design ideas',type='primary',disabled=not bool(geminiApiKey)):
+        with st.spinner('Reviewing your component and material options…'):
+            try:
+                result=queryGeminiEngineer(payload)
+                if not result or not result.engineeringProposals: raise ValueError('No design proposals returned. Please try again.')
+                st.session_state.aiReport=result
+                st.session_state.ecpReportContent=None
+            except Exception as exc: st.error('Analysis couldn’t finish. '+error_message(exc))
+    if not geminiApiKey: st.info('Configure a Gemini key in local Streamlit secrets to enable AI features.')
+    report=st.session_state.aiReport
+    if report:
+        st.markdown('#### Areas to investigate')
+        for item in report.identifiedBottlenecks:
+            with st.expander(f'{item.severity} · {item.phenomenon}'):
+                st.caption(item.affectedRegion); st.write(item.rootCause)
+        for i,proposal in enumerate(report.engineeringProposals,1):
+            with st.container(border=True):
+                st.caption(f'DIRECTION {i:02d} / {proposal.badge}')
+                st.markdown('### '+proposal.strategyName); st.write(proposal.recommendedMaterial)
+                x,y,z=st.columns(3)
+                x.metric('Carbon reduction',f'{proposal.carbonReductionPct:g}%')
+                y.metric('Cost change',f'{proposal.costDeltaPct:+g}%')
+                z.metric('Proposed mass',f'{proposal.estimatedNewMassKg:g} kg')
+                with st.expander('Reasoning & suggested changes'):
+                    st.write('**Structural:** '+proposal.structuralFeasibility)
+                    st.write('**Thermal:** '+proposal.thermalFeasibility)
+                    for change in proposal.cadModifications: st.markdown('- '+change)
     else:
-        st.info("Upload a .step, .stp, .stl, or .obj file to initiate analysis.")
-
-with tabReport:
+        with st.container(border=True):
+            st.markdown('#### Your options will appear here')
+            st.write('Add your operating conditions, then generate ideas. You can explore the model freely without triggering extra AI requests.')
+with review:
+    st.markdown('### A clearer path from idea to review')
+    st.caption('Discuss constraints, then capture the conversation in a downloadable draft.')
+    with st.container(border=True):
+        for message in st.session_state.chatMessages:
+            with st.chat_message(message['role']): st.markdown(message['content'])
+        if not st.session_state.chatMessages: st.caption('Try: “What should I validate before switching materials?”')
+        question=st.chat_input('Ask about materials, mounting, fatigue, or next steps…',disabled=not bool(geminiApiKey))
+        if question:
+            with st.chat_message('user'): st.write(question)
+            with st.spinner('Considering your design context…'):
+                try:
+                    reply=chatWithEngineer(payload,st.session_state.chatMessages,question)
+                    if not reply: raise ValueError('Empty response. Please try again.')
+                    st.session_state.chatMessages.extend([dict(role='user',content=question),dict(role='assistant',content=reply)])
+                    st.session_state.ecpReportContent=None
+                    with st.chat_message('assistant'): st.markdown(reply)
+                except Exception as exc: st.error('Couldn’t send your question. '+error_message(exc))
+    st.markdown('### Engineering review draft')
+    st.caption('Summarizes the current baseline and discussion. Recheck numerical claims before sharing.')
+    if st.button('Create review draft',type='primary',disabled=not bool(geminiApiKey)):
+        with st.spinner('Preparing your review draft…'):
+            try:
+                st.session_state.ecpReportContent=generateFormalEcpReport(payload,st.session_state.chatMessages)
+            except Exception as exc: st.error('Couldn’t create the draft. '+error_message(exc))
     if st.session_state.ecpReportContent:
-        st.download_button(
-            label="Download Formal ECP Report (.md)",
-            data=st.session_state.ecpReportContent,
-            file_name="VERDANT_ECP_Audit_Report.md",
-            mime="text/markdown",
-            use_container_width=True
-        )
-        st.markdown("---")
-        st.markdown(st.session_state.ecpReportContent)
-    else:
-        st.info("No report has been compiled yet. Conduct your analysis in the workspace tab and select 'Compile Formal ECP Report'.")
+        st.download_button('Download review · Markdown',st.session_state.ecpReportContent,file_name='Verdant_Engineering_Review.md',mime='text/markdown')
+        with st.expander('Preview review',expanded=True): st.markdown(st.session_state.ecpReportContent)

@@ -13,14 +13,22 @@ from typing import List, Dict
 from pydantic import BaseModel, Field
 from google import genai
 from google.genai import types
+import streamlit as st
+from streamlit.errors import StreamlitSecretNotFoundError
 
-"""
-Centralized Gemini API Key configuration.
-Paste your active Google AI Studio API key directly into this variable.
-Alternatively, set the GEMINI_API_KEY environment variable.
-"""
-geminiApiKey = os.environ.get("GEMINI_API_KEY", "YOUR_GEMINI_API_KEY_HERE")
-geminiModelName = "gemini-3.5-flash"
+def readSetting(name, default=""):
+    """Read environment variables or local/hosted Streamlit secrets."""
+    value = os.environ.get(name)
+    if value:
+        return value
+    try:
+        return st.secrets.get(name, default)
+    except StreamlitSecretNotFoundError:
+        return default
+
+
+geminiApiKey = readSetting("GEMINI_API_KEY")
+geminiModelName = readSetting("GEMINI_MODEL", "gemini-3.5-flash")
 
 
 class EngineeringBottleneck(BaseModel):
