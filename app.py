@@ -23,7 +23,7 @@ h1 {font-size:2.8rem!important;font-weight:800!important;} h2 {font-size:1.55rem
 [data-testid="stHeader"] {background:#f5f7f3e8;} .block-container {max-width:1440px;padding-top:4rem;padding-bottom:4rem;}
 [data-testid="stSidebar"] {background:#ebf0e8;border-right:1px solid #dbe3d7;} [data-testid="stSidebar"] .block-container {padding-top:0!important;}
 [data-testid="stSidebarUserContent"] {padding-top:0!important;}
-[data-testid="stSidebarHeader"] {padding-top:0!important;padding-bottom:0!important;min-height:0!important;height:0!important;overflow:visible;}
+[data-testid="stSidebarHeader"] {padding-top:0.5rem!important;padding-bottom:0!important;min-height:2.5rem!important;height:auto!important;overflow:visible;box-sizing:border-box;}
 [data-testid="stVerticalBlockBorderWrapper"] {border-radius:16px!important;}
 [data-testid="stMetric"] {background:white;padding:20px;border:1px solid #e1e7dd;border-radius:14px;}
 [data-testid="stMetricValue"] {font-family:'Manrope',sans-serif;font-size:1.8rem;color:#193e2b;}
