@@ -21,7 +21,9 @@ a.anchor-link {display:none!important;}
 h1,h2,h3 {font-family:'Manrope',sans-serif!important;letter-spacing:-.045em!important;color:#173c2c!important;}
 h1 {font-size:2.8rem!important;font-weight:800!important;} h2 {font-size:1.55rem!important;} h3 {font-size:1.15rem!important;}
 [data-testid="stHeader"] {background:#f5f7f3e8;} .block-container {max-width:1440px;padding-top:4rem;padding-bottom:4rem;}
-[data-testid="stSidebar"] {background:#ebf0e8;border-right:1px solid #dbe3d7;} [data-testid="stSidebar"] .block-container {padding-top:2rem;}
+[data-testid="stSidebar"] {background:#ebf0e8;border-right:1px solid #dbe3d7;} [data-testid="stSidebar"] .block-container {padding-top:0.5rem;}
+[data-testid="stSidebarUserContent"] {padding-top:0!important;}
+[data-testid="stSidebarHeader"] {padding-top:0!important;padding-bottom:0!important;min-height:2rem!important;height:2rem!important;}
 [data-testid="stVerticalBlockBorderWrapper"] {border-radius:16px!important;}
 [data-testid="stMetric"] {background:white;padding:20px;border:1px solid #e1e7dd;border-radius:14px;}
 [data-testid="stMetricValue"] {font-family:'Manrope',sans-serif;font-size:1.8rem;color:#193e2b;}
@@ -47,7 +49,7 @@ h1 {font-size:2.8rem!important;font-weight:800!important;} h2 {font-size:1.55rem
 @media(max-width:700px){.hero h1{font-size:1.5rem!important}.hero{padding:16px}[data-baseweb="tab"]{padding:10px 12px}.block-container{padding-left:1rem;padding-right:1rem}}
 </style>''', unsafe_allow_html=True)
 
-for key, default in dict(chatMessages=[], ecpReportContent=None, aiReport=None, contextKey=None, sample=None).items():
+for key, default in dict(chatMessages=[], ecpReportContent=None, aiReport=None, contextKey=None, sample=None, analyzedModel=None).items():
     if key not in st.session_state:
         st.session_state[key] = default
 
@@ -104,6 +106,7 @@ with st.sidebar:
         high=b.number_input('Max · °C',value=65.0,step=5.0)
         constrained=st.checkbox('Rigidly constrained',help='Mounting prevents free thermal expansion.')
     st.divider()
+    regeneration_slot = st.empty()
 
 st.markdown('<div class="eyebrow">COMPONENT DESIGN STUDIO / WORKSPACE</div>',unsafe_allow_html=True)
 st.markdown('''<div class="hero"><h1>Better parts. A lighter footprint.</h1><p>Explore your component, compare design ideas, and prepare your review.</p></div>''',unsafe_allow_html=True)
@@ -136,9 +139,13 @@ except Exception as exc:
     st.error('We couldn’t read this component. Try exporting it as a closed STEP or STL solid.')
     with st.expander('Error details'): st.code(error_message(exc))
     st.stop()
+model_key=hashlib.sha256(data).hexdigest()
 context=hashlib.sha256(data+json.dumps(params,sort_keys=True).encode()).hexdigest()
 if context!=st.session_state.contextKey:
     st.session_state.update(contextKey=context,aiReport=None,chatMessages=[],ecpReportContent=None)
+regenerate=False
+if st.session_state.analyzedModel == model_key or st.session_state.aiReport is not None:
+    regenerate=regeneration_slot.button('Regenerate design ideas',type='primary',width='stretch',disabled=not bool(geminiApiKey),key='sidebar_regenerate')
 baseline=payload['baselineSummary']
 st.markdown(f'<div class="file-name">{html.escape(name)}</div>',unsafe_allow_html=True)
 st.caption(('STEP solid' if cad['isBRep'] else 'Polygon mesh')+'  ·  '+ ' × '.join(f'{v:g}' for v in baseline['extentsMm'])+' mm  ·  Current baseline')
@@ -160,13 +167,15 @@ with overview:
 with ideas:
     st.markdown('### Find your next design direction')
     st.caption('Compare opportunities for material substitution, lightweighting, and lower cost. AI suggestions require engineering verification.')
-    if st.button('Refresh design ideas' if st.session_state.aiReport else 'Generate design ideas',type='primary',disabled=not bool(geminiApiKey)):
+    if st.button('Refresh design ideas' if st.session_state.aiReport else 'Generate design ideas',type='primary',disabled=not bool(geminiApiKey)) or regenerate:
         with st.spinner('Reviewing your component and material options…'):
             try:
                 result=queryGeminiEngineer(payload)
                 if not result or not result.engineeringProposals: raise ValueError('No design proposals returned. Please try again.')
                 st.session_state.aiReport=result
                 st.session_state.ecpReportContent=None
+                st.session_state.analyzedModel=model_key
+                st.rerun()
             except Exception as exc: st.error('Analysis couldn’t finish. '+error_message(exc))
     if not geminiApiKey: st.info('Configure a Gemini key in local Streamlit secrets to enable AI features.')
     report=st.session_state.aiReport
