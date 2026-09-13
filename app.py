@@ -11,7 +11,7 @@ from physicsEngine import computePhysicalInvariants
 from materialDatabase import materialDatabase
 from geminiAdvisor import queryGeminiEngineer, chatWithEngineer, generateFormalEcpReport, geminiApiKey
 
-st.set_page_config(page_title="Verdant · Design with less", page_icon="🌿", layout="wide")
+st.set_page_config(page_title="Verdant", page_icon="🌿", layout="wide")
 st.markdown('''<style>
 @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap');
 :root {color-scheme:light;}
