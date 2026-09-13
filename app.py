@@ -15,6 +15,8 @@ st.set_page_config(page_title="Verdant · Design with less", page_icon="🌿", l
 st.markdown('''<style>
 @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap');
 :root {color-scheme:light;}
+[data-testid="stHeaderActionElements"] {display:none!important;}
+a.anchor-link {display:none!important;}
 .stApp {background:#f5f7f3;color:#213c32;font-family:'DM Sans',sans-serif;}
 h1,h2,h3 {font-family:'Manrope',sans-serif!important;letter-spacing:-.045em!important;color:#173c2c!important;}
 h1 {font-size:2.8rem!important;font-weight:800!important;} h2 {font-size:1.55rem!important;} h3 {font-size:1.15rem!important;}
@@ -101,8 +103,6 @@ with st.sidebar:
         high=b.number_input('Max · °C',value=65.0,step=5.0)
         constrained=st.checkbox('Rigidly constrained',help='Mounting prevents free thermal expansion.')
     st.divider()
-    st.caption('● Gemini key configured' if geminiApiKey else '○ Gemini key not configured')
-    st.caption('Local workspace · files stay on this computer. AI actions send component metrics and chat to Gemini.')
 
 st.markdown('<div class="eyebrow">COMPONENT DESIGN STUDIO / WORKSPACE</div>',unsafe_allow_html=True)
 st.markdown('''<div class="hero"><h1>Better parts. A lighter footprint.</h1><p>Explore your component, compare design ideas, and prepare your review.</p></div>''',unsafe_allow_html=True)
