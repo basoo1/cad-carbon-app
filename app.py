@@ -21,9 +21,9 @@ a.anchor-link {display:none!important;}
 h1,h2,h3 {font-family:'Manrope',sans-serif!important;letter-spacing:-.045em!important;color:#173c2c!important;}
 h1 {font-size:2.8rem!important;font-weight:800!important;} h2 {font-size:1.55rem!important;} h3 {font-size:1.15rem!important;}
 [data-testid="stHeader"] {background:#f5f7f3e8;} .block-container {max-width:1440px;padding-top:4rem;padding-bottom:4rem;}
-[data-testid="stSidebar"] {background:#ebf0e8;border-right:1px solid #dbe3d7;} [data-testid="stSidebar"] .block-container {padding-top:0.5rem;}
+[data-testid="stSidebar"] {background:#ebf0e8;border-right:1px solid #dbe3d7;} [data-testid="stSidebar"] .block-container {padding-top:0!important;}
 [data-testid="stSidebarUserContent"] {padding-top:0!important;}
-[data-testid="stSidebarHeader"] {padding-top:0!important;padding-bottom:0!important;min-height:2rem!important;height:2rem!important;}
+[data-testid="stSidebarHeader"] {padding-top:0!important;padding-bottom:0!important;min-height:0!important;height:0!important;overflow:visible;}
 [data-testid="stVerticalBlockBorderWrapper"] {border-radius:16px!important;}
 [data-testid="stMetric"] {background:white;padding:20px;border:1px solid #e1e7dd;border-radius:14px;}
 [data-testid="stMetricValue"] {font-family:'Manrope',sans-serif;font-size:1.8rem;color:#193e2b;}
@@ -49,7 +49,7 @@ h1 {font-size:2.8rem!important;font-weight:800!important;} h2 {font-size:1.55rem
 @media(max-width:700px){.hero h1{font-size:1.5rem!important}.hero{padding:16px}[data-baseweb="tab"]{padding:10px 12px}.block-container{padding-left:1rem;padding-right:1rem}}
 </style>''', unsafe_allow_html=True)
 
-for key, default in dict(chatMessages=[], ecpReportContent=None, aiReport=None, contextKey=None, sample=None, analyzedModel=None).items():
+for key, default in dict(chatMessages=[], ecpReportContent=None, aiReport=None, contextKey=None, sample=None, analyzedModel=None, activeModel=None, analyzedContext=None).items():
     if key not in st.session_state:
         st.session_state[key] = default
 
@@ -141,11 +141,18 @@ except Exception as exc:
     st.stop()
 model_key=hashlib.sha256(data).hexdigest()
 context=hashlib.sha256(data+json.dumps(params,sort_keys=True).encode()).hexdigest()
-if context!=st.session_state.contextKey:
-    st.session_state.update(contextKey=context,aiReport=None,chatMessages=[],ecpReportContent=None)
+if model_key != st.session_state.activeModel:
+    st.session_state.update(activeModel=model_key,aiReport=None,analyzedModel=None,analyzedContext=None,chatMessages=[],ecpReportContent=None)
+if context != st.session_state.contextKey:
+    st.session_state.update(contextKey=context,chatMessages=[],ecpReportContent=None)
+pending_changes = st.session_state.aiReport is not None and st.session_state.analyzedContext != context
+pending_message = 'Design conditions have changed. The ideas below still use your previous conditions. Click Regenerate design ideas in the sidebar to apply your changes.'
 regenerate=False
 if st.session_state.analyzedModel == model_key or st.session_state.aiReport is not None:
-    regenerate=regeneration_slot.button('Regenerate design ideas',type='primary',width='stretch',disabled=not bool(geminiApiKey),key='sidebar_regenerate')
+    with regeneration_slot.container():
+        if pending_changes:
+            st.warning('Changes not applied to Design ideas. Click Regenerate design ideas to update them.')
+        regenerate=st.button('Regenerate design ideas',type='primary',width='stretch',disabled=not bool(geminiApiKey),key='sidebar_regenerate')
 baseline=payload['baselineSummary']
 st.markdown(f'<div class="file-name">{html.escape(name)}</div>',unsafe_allow_html=True)
 st.caption(('STEP solid' if cad['isBRep'] else 'Polygon mesh')+'  ·  '+ ' × '.join(f'{v:g}' for v in baseline['extentsMm'])+' mm  ·  Current baseline')
@@ -167,7 +174,12 @@ with overview:
 with ideas:
     st.markdown('### Find your next design direction')
     st.caption('Compare opportunities for material substitution, lightweighting, and lower cost. AI suggestions require engineering verification.')
-    if st.button('Refresh design ideas' if st.session_state.aiReport else 'Generate design ideas',type='primary',disabled=not bool(geminiApiKey)) or regenerate:
+    if pending_changes:
+        st.warning(pending_message)
+    generate = False
+    if st.session_state.aiReport is None:
+        generate = st.button('Generate design ideas',type='primary',disabled=not bool(geminiApiKey))
+    if generate or regenerate:
         with st.spinner('Reviewing your component and material options…'):
             try:
                 result=queryGeminiEngineer(payload)
@@ -175,6 +187,7 @@ with ideas:
                 st.session_state.aiReport=result
                 st.session_state.ecpReportContent=None
                 st.session_state.analyzedModel=model_key
+                st.session_state.analyzedContext=context
                 st.rerun()
             except Exception as exc: st.error('Analysis couldn’t finish. '+error_message(exc))
     if not geminiApiKey: st.info('Configure a Gemini key in local Streamlit secrets to enable AI features.')
