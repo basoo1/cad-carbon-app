@@ -66,7 +66,8 @@ def mesh_plot(cad):
     fig = go.Figure(go.Mesh3d(x=v[:, 0], y=v[:, 1], z=v[:, 2], i=f[:, 0], j=f[:, 1], k=f[:, 2],
         color='#709965', flatshading=True, lighting=dict(ambient=.55, diffuse=.8, roughness=.5), hoverinfo='skip'))
     fig.update_layout(height=370, paper_bgcolor='#ffffff', margin=dict(l=0,r=0,t=0,b=0),
-        scene=dict(bgcolor='#ffffff', aspectmode='data', camera=dict(eye=dict(x=1.6,y=1.6,z=1.1)),
+        scene=dict(bgcolor='#ffffff', aspectmode='data',
+                   camera=dict(up=dict(x=0, y=1, z=0), eye=dict(x=1.6, y=1.1, z=1.6)),
         xaxis=dict(title='X · mm',showbackground=False,gridcolor='#edf0e9'),
         yaxis=dict(title='Y · mm',showbackground=False,gridcolor='#edf0e9'),
         zaxis=dict(title='Z · mm',showbackground=False,gridcolor='#edf0e9')))
