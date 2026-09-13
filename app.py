@@ -27,17 +27,22 @@ h1 {font-size:2.8rem!important;font-weight:800!important;} h2 {font-size:1.55rem
 .stButton button,.stDownloadButton button {border-radius:9px;min-height:42px;font-weight:600;}
 .stButton button[kind="primary"] {background:#244e39;border:1px solid #244e39;color:white;}
 .stButton button[kind="primary"]:hover {background:#366c4e;border-color:#366c4e;}
-[data-baseweb="tab-list"] {gap:24px;border-bottom:1px solid #dbe3d7;margin-bottom:22px;} [data-baseweb="tab"] {color:#566b5e;padding:12px 2px;}
+[data-baseweb="tab-list"] {gap:8px;border-bottom:0;margin-bottom:20px;padding:6px;background:#e3eadf;border-radius:12px;flex-wrap:wrap;height:auto;}
+[data-baseweb="tab"] {color:#354f3e;padding:12px 20px;border-radius:8px;min-height:48px;height:auto;flex:1;white-space:normal;}
+[data-baseweb="tab"] p {font-size:15px;font-weight:700;}
+[data-baseweb="tab"][aria-selected="true"] {background:#244e39;color:#fff;}
+[data-baseweb="tab-highlight"],[data-baseweb="tab-border"] {display:none;}
+[data-baseweb="tab"]:focus-visible {outline:3px solid #709965;outline-offset:2px;}
 [data-testid="stFileUploader"] {background:#fff;border-radius:12px;}
 .brand {font-family:Manrope,sans-serif;font-weight:800;font-size:26px;letter-spacing:-1px;margin-bottom:3px;}
-.brand span {color:#7d9c55;} .eyebrow {color:#6a805f;font-size:11px;font-weight:700;letter-spacing:2px;text-transform:uppercase;}
-.subtle {color:#778674;font-size:13px;line-height:1.7;} .hero {border-radius:20px;padding:32px;background:#e4eddf;margin:6px 0 24px;position:relative;overflow:hidden;}
-.hero h1 {margin:8px 0 12px;max-width:700px;} .hero p {color:#56704e;max-width:640px;font-size:16px;line-height:1.7;margin:0;}
+.brand span {color:#7d9c55;} .eyebrow {color:#4d634f;font-size:11px;font-weight:700;letter-spacing:2px;text-transform:uppercase;}
+.subtle {color:#4d634f;font-size:13px;line-height:1.6;} .hero {border-radius:14px;padding:18px 24px;background:#e4eddf;margin:4px 0 12px;}
+.hero h1 {font-size:1.85rem!important;margin:0 0 6px;padding:0!important;max-width:none;line-height:1.25!important;} .hero p {color:#425d3c;font-size:14px;line-height:1.5;margin:0;}
 .pill {display:inline-block;border:1px solid #c8d8bf;border-radius:30px;padding:5px 12px;font-size:11px;color:#4d6845;letter-spacing:.5px;}
 .step {font-size:12px;color:#6e8065;padding:0 0 20px;letter-spacing:.3px;} .step b {color:#244e39;} .step span {margin:0 18px;color:#a3b09b;}
 .file-name {font-family:Manrope,sans-serif;font-size:22px;font-weight:700;color:#244e39;overflow-wrap:anywhere;}
-[data-testid="stCaptionContainer"] {color:#657660;}
-@media(max-width:700px){h1{font-size:2rem!important}.hero{padding:22px}.step span{margin:0 6px}.block-container{padding-left:1rem;padding-right:1rem}}
+[data-testid="stCaptionContainer"], [data-testid="stCaptionContainer"] p {color:#4d634f!important;opacity:1;}
+@media(max-width:700px){.hero h1{font-size:1.5rem!important}.hero{padding:16px}[data-baseweb="tab"]{padding:10px 12px}.block-container{padding-left:1rem;padding-right:1rem}}
 </style>''', unsafe_allow_html=True)
 
 for key, default in dict(chatMessages=[], ecpReportContent=None, aiReport=None, contextKey=None, sample=None).items():
@@ -100,8 +105,7 @@ with st.sidebar:
     st.caption('Local workspace · files stay on this computer. AI actions send component metrics and chat to Gemini.')
 
 st.markdown('<div class="eyebrow">COMPONENT DESIGN STUDIO / WORKSPACE</div>',unsafe_allow_html=True)
-st.markdown('''<div class="hero"><span class="pill">SUSTAINABILITY STARTS WITH DESIGN</span><h1>Better parts.<br>A lighter footprint.</h1><p>Explore your geometry, understand its material impact, and discover possibilities for a more efficient design.</p></div>''',unsafe_allow_html=True)
-st.markdown('<div class="step"><b>01 &nbsp; Add a component</b><span>→</span>02 &nbsp; Explore & analyze<span>→</span>03 &nbsp; Export your review</div>',unsafe_allow_html=True)
+st.markdown('''<div class="hero"><h1>Better parts. A lighter footprint.</h1><p>Explore your component, compare design ideas, and prepare your review.</p></div>''',unsafe_allow_html=True)
 
 with st.expander('Component library',expanded=True):
     upload=st.file_uploader('Upload a component',type=['step','stp','stl','obj'],help='Mesh coordinates are interpreted as millimeters. STEP units are handled by the importer.')
@@ -142,13 +146,12 @@ for col,label,value in zip(metrics,['Estimated mass','Embodied carbon','Material
 st.write('')
 overview,ideas,review=st.tabs(['Overview','Design ideas','Review & export'])
 with overview:
-    a,b=st.columns([1.2,1])
-    with a,st.container(border=True):
+    with st.container(border=True):
         st.markdown('### Your component'); st.caption('Drag to orbit · scroll to zoom · double-click to reset')
-        st.plotly_chart(mesh_plot(cad),width='stretch',config={'displaylogo':False})
-    with b,st.container(border=True):
+        st.plotly_chart(mesh_plot(cad),config={'displaylogo':False})
+    with st.container(border=True):
         st.markdown('### Material landscape'); st.caption('Your baseline is highlighted. Hover to compare materials.')
-        st.plotly_chart(materials_plot(selected),width='stretch',config={'displaylogo':False})
+        st.plotly_chart(materials_plot(selected),config={'displaylogo':False})
     with st.expander('Calculation assumptions & limitations'):
         st.write('These are screening estimates, not validated structural results. The current engine approximates the cross section from volume and bounding dimensions; its thickness and inertia estimates do not resolve local walls or complex sections. Bending and tension are not modeled separately. Mesh units are assumed to be millimeters, and open meshes use a convex-hull volume estimate.')
         st.write('Use verified geometry, material data, load conditions, and an appropriate engineering analysis before making a design decision.')
